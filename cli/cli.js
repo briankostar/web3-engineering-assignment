@@ -18,7 +18,7 @@ const main = async () => {
     console.log('My ether is', myBalance)
 
     let CommitRevealContract = new web3.eth.Contract(abi)
-    let deployed = await CommitRevealContract.deploy({ data: contractFile.bytecode, arguments: [120, "YES", "NO"] })
+    let deployed = await CommitRevealContract.deploy({ data: contractFile.bytecode, arguments: [3, "YES", "NO"] })
         // use truffle default values
         .send({
             from: '0xc782f1e484b190237f003ea056f6ba18b553fce0',
@@ -35,15 +35,43 @@ const main = async () => {
             CommitRevealContract.options.address = newContractInstance.options.address;
             console.log('newContractInstance', newContractInstance.options.address) // instance with the new contract address
         });
-    // .estimateGas(function (err, gas) {
-    //     console.log(gas);
-    // });
 
-    // .then(function (choice1) {
-    console.log('methods', CommitRevealContract.methods)
-    console.log('choice1', await CommitRevealContract.methods.choice2().call())
-    console.log('endtime', await CommitRevealContract.methods.commitPhaseEndTime().call())
-    // console.log('getWinner', await CommitRevealContract.methods.getWinner().call())
+    CommitRevealContract.methods.choice1().estimateGas(function (err, gas) {
+        console.log('get choice1 gas', gas);
+    });
+
+    CommitRevealContract.methods.commitVote("0xe01c30ed9fc405f6f7cc0c26e92542fcbecd4f3566149d5bc42f4d38cd7bbee4").estimateGas(function (err, gas) {
+        console.log('commitVote gas', gas);
+    });
+
+    CommitRevealContract.methods.revealVote("1-password1", "0xe01c30ed9fc405f6f7cc0c26e92542fcbecd4f3566149d5bc42f4d38cd7bbee4").estimateGas(function (err, gas) {
+        console.log('revealVote gas', err, gas);
+    });
+
+    CommitRevealContract.methods.commitVote("0xe01c30ed9fc405f6f7cc0c26e92542fcbecd4f3566149d5bc42f4d38cd7bbee4")
+        .send({
+            from: '0xc782f1e484b190237f003ea056f6ba18b553fce0',
+            gas: 4712388,
+            gasPrice: '100000000000'
+        })
+
+    setTimeout(() => {
+        console.log('reavealing')
+        CommitRevealContract.methods.revealVote("1-password1", "0xe01c30ed9fc405f6f7cc0c26e92542fcbecd4f3566149d5bc42f4d38cd7bbee4")
+            .send({
+                from: '0xc782f1e484b190237f003ea056f6ba18b553fce0',
+                gas: 4712388,
+                gasPrice: '100000000000'
+            })
+
+    }, 2000)
+
+    setTimeout(async () => {
+
+        console.log('getWinner', await CommitRevealContract.methods.getWinner().call())
+    }, 4000)
+
+
 }
 
 main();
