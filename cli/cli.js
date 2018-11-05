@@ -1,31 +1,64 @@
+#!/usr/bin/env node
+
 const fs = require('fs');
+const inquirer = require("inquirer");
+const chalk = require("chalk");
+const figlet = require("figlet");
 const Web3 = require('web3');
 const dotenv = require('dotenv')
 const envConf = dotenv.config().parsed; //To use in production
 
-//Update config to use
+//Update config to use, especially DEFAULT_ACCOUNT
 const config = {
     "NETWORK": "http://127.0.0.1:8545",
-    "DEFAUT_ACCOUNT": '0xc782f1e484b190237f003ea056f6ba18b553fce0',
+    "DEFAULT_ACCOUNT": '0xc782f1e484b190237f003ea056f6ba18b553fce0',
     "GAS": "4712388",
     "GAS_PRICE": '100000000000'
 }
 
 const sendOption = {
-    from: config.DEFAUT_ACCOUNT,
+    from: config.DEFAULT_ACCOUNT,
     gas: config.GAS,
     gasPrice: config.GAS_PRICE
 }
 
 const web3 = new Web3(new Web3.providers.HttpProvider(config.NETWORK))
 
-web3.eth.defaultAccount = config.DEFAUT_ACCOUNT;
+web3.eth.defaultAccount = config.DEFAULT_ACCOUNT;
 
 let jsonFile = "./build/contracts/CommitReveal.json";
 let contractFile = JSON.parse(fs.readFileSync(jsonFile));
 let abi = contractFile.abi;
 
+const init = async () => {
+    console.log(
+        chalk.green(
+            figlet.textSync("YES OR NO", {
+                font: "dr pepper",
+                horizontalLayout: 'fitted',
+                verticalLayout: 'fitted'
+            })
+        )
+    );
+
+    const answers = await askQuestions();
+    const { FILENAME, EXTENSION } = answers;
+}
+
+const askQuestions = () => {
+    const questions = [
+        {
+            name: "Welcome",
+            type: "confirm",
+            message: "Welcome to the ethereum voting process. Have you already followed through the README?"
+        }
+    ];
+    return inquirer.prompt(questions);
+};
+
 const main = async () => {
+    init();
+
     let myBalanceWei = await web3.eth.getBalance(web3.eth.defaultAccount)
     let myBalance = await web3.utils.fromWei(myBalanceWei, 'ether')
 
@@ -64,4 +97,6 @@ const main = async () => {
 
 }
 
-main();
+// main();
+
+init();
