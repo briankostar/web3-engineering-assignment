@@ -217,7 +217,7 @@ const revealVote = async (answers) => {
             log('Nice! Vote was sucessfully revealed!')
         })
         .catch((error) => {
-            log('Error Occurred. Check status to make sure voting is in reveal phase', error)
+            log('Error Occurred. Check status to make sure voting is in reveal phase or if you entered the right inputs', error)
         })
 }
 

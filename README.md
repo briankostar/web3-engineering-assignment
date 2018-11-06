@@ -30,7 +30,7 @@ truffle compile
 
 truffle migrate
 
-npm symlink
+npm link
 
 ## How to use:
 ethvote start
