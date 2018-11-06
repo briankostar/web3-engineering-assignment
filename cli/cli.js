@@ -19,6 +19,7 @@ const config = {
     "GAS": "4712388",
     "GAS_PRICE": 100000000000,
     "VOTING_TIME": 60,
+    "QUESTION": "Do you think DOGS make better pets than CATS?",
     "CHOICE1": "YES",
     "CHOICE2": "NO",
     "CONTRACT_ADDRESS": ""
@@ -30,14 +31,13 @@ const sendOption = {
     gasPrice: config.GAS_PRICE
 }
 
-const web3 = new Web3(new Web3.providers.HttpProvider(config.NETWORK))
 let CommitRevealContract;
-
-web3.eth.defaultAccount = config.DEFAULT_ACCOUNT;
-
 let jsonFile = "./build/contracts/CommitReveal.json";
 let contractFile = JSON.parse(fs.readFileSync(jsonFile));
 let abi = contractFile.abi;
+
+const web3 = new Web3(new Web3.providers.HttpProvider(config.NETWORK))
+web3.eth.defaultAccount = config.DEFAULT_ACCOUNT;
 
 program
     .version('0.1.0')
@@ -64,10 +64,10 @@ program
             {
                 name: "vote",
                 type: "list",
-                message: "Do you think DOGS make better pets than CATS?",
-                choices: ['YES', 'NO'],
+                message: config.QUESTION,
+                choices: [config.CHOICE1, config.CHOICE2],
                 filter: function (val) {
-                    return (val === 'YES') ? 1 : 0;
+                    return (val === config.CHOICE1) ? 1 : 2;
                 }
             },
             {
@@ -86,15 +86,14 @@ program
     .command('reveal')
     .description('Starts the vote counting process')
     .action(() => {
-        console.log('count: ')
         const questions = [
             {
                 name: "vote",
                 type: "list",
                 message: "Lets reveal your votes. First, what was the vote you made?",
-                choices: ['YES', 'NO'],
+                choices: [config.CHOICE1, config.CHOICE2],
                 filter: function (val) {
-                    return (val === 'YES') ? 1 : 0;
+                    return (val === config.CHOICE1) ? 1 : 2;
                 }
             },
             {
@@ -117,42 +116,28 @@ const status = async () => {
     const VOTESFORCHOICE2 = parseInt(await CommitRevealContract.methods.votesForChoice2().call());
     const VOTES_REVEALED_COUNT = VOTESFORCHOICE1 + VOTESFORCHOICE2;
 
-    // log('config.CONTRACT_ADDRESS', CONTRACT_ADDRESS, VOTE_END_TIME)
-    // log('start', Date.now())
-    // log('end--', VOTE_END_TIME)
-    // log('Date.now() < VOTE_END_TIME', Date.now() < VOTE_END_TIME)
-    // log(VOTES_COUNT, VOTES_REVEALED_COUNT, VOTESFORCHOICE1)
-
-    let status = 0;
     if (!CONTRACT_ADDRESS) {
         log('Current Phase: ' + chalk.green('Pre-Voting'))
         log('To start the voting process, enter \'ethvote start\'')
-        status = 0;
     } else if (CONTRACT_ADDRESS && (Date.now() < VOTE_END_TIME)) {
         log('Current Phase: ' + chalk.green('Voting'))
         let timeleft = (VOTE_END_TIME - Date.now()) / 1000
         log(`Time Left in this Period: ${chalk.green(timeleft)} seconds`)
         log(`Number of Votes Revealed: ${VOTES_REVEALED_COUNT}`)
         log(`Number of Votes Committed: ${VOTES_COUNT}`)
-        status = 1;
     } else if (CONTRACT_ADDRESS && (Date.now() > VOTE_END_TIME) && (VOTES_COUNT > VOTES_REVEALED_COUNT)) {
         log('Current Phase: ' + chalk.green('Revealing'))
         log(`Time Left in this Period: ${chalk.green('Indefinite until all votes revealed')}`)
         log(`Number of Votes Revealed: ${VOTES_REVEALED_COUNT}`)
         log(`Number of Votes Committed: ${VOTES_COUNT}`)
-        status = 2;
     } else if (CONTRACT_ADDRESS && (Date.now() > VOTE_END_TIME) && (VOTES_COUNT === VOTES_REVEALED_COUNT)) {
         log('Current Phase: ' + chalk.green('Revealed'))
         log(`Number of Votes Revealed: ${VOTES_REVEALED_COUNT}`)
         log(`Number of Votes Committed: ${VOTES_COUNT}`)
         log('All Votes have been counted for. Majority said.. ', await getWinner())
-        status = 3;
     } else {
         log('Unknown status error')
-        status = 4;
     }
-
-    return status;
 }
 
 const banner = () => {
@@ -225,21 +210,16 @@ const getWinner = async () => {
     return await CommitRevealContract.methods.getWinner().call();
 }
 
-const init = async () => {
+const main = async () => {
     //To persist deployed contract address
     await storage.init({ dir: '.tmp/', expiredInterval: 5 * 60 * 1000 });
 
     CommitRevealContract = new web3.eth.Contract(abi)
     CommitRevealContract.options.address = await storage.getItem('CONTRACT_ADDRESS');
-}
-
-const main = async () => {
-
-    init();
 
     let myBalanceWei = await web3.eth.getBalance(web3.eth.defaultAccount)
     let myBalance = await web3.utils.fromWei(myBalanceWei, 'ether')
-    log('Welcome! ETH Balance on this account is: ', myBalance)
+    log('ETH Balance on this account is: ', myBalance)
 
     program.parse(process.argv);
 }
