@@ -5,15 +5,23 @@ const inquirer = require("inquirer");
 const chalk = require("chalk");
 const figlet = require("figlet");
 const Web3 = require('web3');
+const keccak256 = require('js-sha3').keccak256;
+const storage = require('node-persist');
+const program = require('commander');
 const dotenv = require('dotenv')
 const envConf = dotenv.config().parsed; //To use in production
+const log = console.log;
 
 //Update config to use, especially DEFAULT_ACCOUNT
 const config = {
     "NETWORK": "http://127.0.0.1:8545",
     "DEFAULT_ACCOUNT": '0xc782f1e484b190237f003ea056f6ba18b553fce0',
     "GAS": "4712388",
-    "GAS_PRICE": '100000000000'
+    "GAS_PRICE": 100000000000,
+    "VOTING_TIME": 60,
+    "CHOICE1": "YES",
+    "CHOICE2": "NO",
+    "CONTRACT_ADDRESS": ""
 }
 
 const sendOption = {
@@ -23,6 +31,7 @@ const sendOption = {
 }
 
 const web3 = new Web3(new Web3.providers.HttpProvider(config.NETWORK))
+let CommitRevealContract;
 
 web3.eth.defaultAccount = config.DEFAULT_ACCOUNT;
 
@@ -30,73 +39,209 @@ let jsonFile = "./build/contracts/CommitReveal.json";
 let contractFile = JSON.parse(fs.readFileSync(jsonFile));
 let abi = contractFile.abi;
 
-const init = async () => {
-    console.log(
+program
+    .version('0.1.0')
+    .description('Shows version number')
+
+program
+    .command('status')
+    .description('Show status of voting process')
+    .action(() => {
+        status();
+    })
+
+program
+    .command('start')
+    .description('Starts the voting process')
+    .action(() => {
+        startVote();
+    })
+program
+    .command('commit')
+    .description('Prompts commands to vote')
+    .action(() => {
+        const questions = [
+            {
+                name: "vote",
+                type: "list",
+                message: "Do you think DOGS make better pets than CATS?",
+                choices: ['YES', 'NO'],
+                filter: function (val) {
+                    return (val === 'YES') ? 1 : 0;
+                }
+            },
+            {
+                name: 'secret',
+                type: 'input',
+                message: "Enter a secret to hash with this vote. Remeber this for vote reveal later!"
+            }
+        ];
+
+        inquirer.prompt(questions).then(answers => {
+            commitVote(answers)
+        })
+    })
+
+program
+    .command('reveal')
+    .description('Starts the vote counting process')
+    .action(() => {
+        console.log('count: ')
+        const questions = [
+            {
+                name: "vote",
+                type: "list",
+                message: "Lets reveal your votes. First, what was the vote you made?",
+                choices: ['YES', 'NO'],
+                filter: function (val) {
+                    return (val === 'YES') ? 1 : 0;
+                }
+            },
+            {
+                name: 'secret',
+                type: 'input',
+                message: "Now enter the secret used to hash this vote."
+            }
+        ];
+
+        inquirer.prompt(questions).then(answers => {
+            revealVote(answers)
+        })
+    })
+
+const status = async () => {
+    const CONTRACT_ADDRESS = await storage.getItem('CONTRACT_ADDRESS')
+    const VOTE_END_TIME = parseInt(await CommitRevealContract.methods.commitPhaseEndTime().call()) * 1000; //multiply to get ms
+    const VOTES_COUNT = parseInt(await CommitRevealContract.methods.numberOfVotesCast().call());
+    const VOTESFORCHOICE1 = parseInt(await CommitRevealContract.methods.votesForChoice1().call());
+    const VOTESFORCHOICE2 = parseInt(await CommitRevealContract.methods.votesForChoice2().call());
+    const VOTES_REVEALED_COUNT = VOTESFORCHOICE1 + VOTESFORCHOICE2;
+
+    // log('config.CONTRACT_ADDRESS', CONTRACT_ADDRESS, VOTE_END_TIME)
+    // log('start', Date.now())
+    // log('end--', VOTE_END_TIME)
+    // log('Date.now() < VOTE_END_TIME', Date.now() < VOTE_END_TIME)
+    // log(VOTES_COUNT, VOTES_REVEALED_COUNT, VOTESFORCHOICE1)
+
+    let status = 0;
+    if (!CONTRACT_ADDRESS) {
+        log('Current Phase: ' + chalk.green('Pre-Voting'))
+        log('To start the voting process, enter \'ethvote start\'')
+        status = 0;
+    } else if (CONTRACT_ADDRESS && (Date.now() < VOTE_END_TIME)) {
+        log('Current Phase: ' + chalk.green('Voting'))
+        let timeleft = (VOTE_END_TIME - Date.now()) / 1000
+        log(`Time Left in this Period: ${chalk.green(timeleft)} seconds`)
+        log(`Number of Votes Revealed: ${VOTES_REVEALED_COUNT}`)
+        log(`Number of Votes Committed: ${VOTES_COUNT}`)
+        status = 1;
+    } else if (CONTRACT_ADDRESS && (Date.now() > VOTE_END_TIME) && (VOTES_COUNT > VOTES_REVEALED_COUNT)) {
+        log('Current Phase: ' + chalk.green('Revealing'))
+        log(`Time Left in this Period: ${chalk.green('Indefinite until all votes revealed')}`)
+        log(`Number of Votes Revealed: ${VOTES_REVEALED_COUNT}`)
+        log(`Number of Votes Committed: ${VOTES_COUNT}`)
+        status = 2;
+    } else if (CONTRACT_ADDRESS && (Date.now() > VOTE_END_TIME) && (VOTES_COUNT === VOTES_REVEALED_COUNT)) {
+        log('Current Phase: ' + chalk.green('Revealed'))
+        log(`Number of Votes Revealed: ${VOTES_REVEALED_COUNT}`)
+        log(`Number of Votes Committed: ${VOTES_COUNT}`)
+        log('All Votes have been counted for. Majority said.. ', await getWinner())
+        status = 3;
+    } else {
+        log('Unknown status error')
+        status = 4;
+    }
+
+    return status;
+}
+
+const banner = () => {
+    log(
         chalk.green(
-            figlet.textSync("YES OR NO", {
+            figlet.textSync("ETHVOTE", {
                 font: "dr pepper",
                 horizontalLayout: 'fitted',
                 verticalLayout: 'fitted'
             })
         )
     );
-
-    const answers = await askQuestions();
-    const { FILENAME, EXTENSION } = answers;
 }
 
-const askQuestions = () => {
-    const questions = [
-        {
-            name: "Welcome",
-            type: "confirm",
-            message: "Welcome to the ethereum voting process. Have you already followed through the README?"
-        }
-    ];
-    return inquirer.prompt(questions);
-};
+const startVote = async () => {
+    banner();
+
+    log('Deploying contract and starting the voting process..')
+    await storage.clear();
+
+    await CommitRevealContract.deploy({ data: contractFile.bytecode, arguments: [config.VOTING_TIME, config.CHOICE1, config.CHOICE2] })
+        // use truffle default values
+        .send(sendOption, (error, transactionHash) => {
+            // log('error, transactionHash', error, transactionHash) 
+        })
+        // .on('error', (error) => { log('error') })
+        // .on('transactionHash', (transactionHash) => { log('transactionHash', transactionHash) })
+        // .on('receipt', (receipt) => { log('receipt', receipt) })
+        // .on('confirmation', (confirmationNumber, receipt) => { log('confirm', confirmationNumber, receipt) })
+        .then((newContractInstance) => {
+            CommitRevealContract.options.address = newContractInstance.options.address;
+            storage.setItem('CONTRACT_ADDRESS', newContractInstance.options.address);
+            log(`Contract is deployed. There are approx ${config.VOTING_TIME} seconds left to vote!`)
+            log(`Use the command ${chalk.green('ethvote commit')} to start voting!`)
+        })
+        .catch((error) => {
+            log('Error Occurred', error)
+        })
+}
+
+const commitVote = async (answers) => {
+    let inputStr = answers.vote + answers.secret
+    let outputHash = "0x" + keccak256(inputStr)
+
+    CommitRevealContract.methods.commitVote(outputHash)
+        .send(sendOption)
+        .then((success) => {
+            log('Thanks! Vote was sucessfully committed!')
+        })
+        .catch((error) => {
+            log('Error Occurred. Check status to make sure voting is still in progress', error)
+        })
+}
+
+const revealVote = async (answers) => {
+    let inputStr = answers.vote + answers.secret
+    let outputHash = "0x" + keccak256(inputStr)
+
+    CommitRevealContract.methods.revealVote(inputStr, outputHash)
+        .send(sendOption)
+        .then((success) => {
+            log('Nice! Vote was sucessfully revealed!')
+        })
+        .catch((error) => {
+            log('Error Occurred. Check status to make sure voting is in reveal phase', error)
+        })
+}
+
+const getWinner = async () => {
+    return await CommitRevealContract.methods.getWinner().call();
+}
+
+const init = async () => {
+    //To persist deployed contract address
+    await storage.init({ dir: '.tmp/', expiredInterval: 5 * 60 * 1000 });
+
+    CommitRevealContract = new web3.eth.Contract(abi)
+    CommitRevealContract.options.address = await storage.getItem('CONTRACT_ADDRESS');
+}
 
 const main = async () => {
+
     init();
 
     let myBalanceWei = await web3.eth.getBalance(web3.eth.defaultAccount)
     let myBalance = await web3.utils.fromWei(myBalanceWei, 'ether')
+    log('Welcome! ETH Balance on this account is: ', myBalance)
 
-    console.log('My ether is', myBalance)
-
-    let CommitRevealContract = new web3.eth.Contract(abi)
-    await CommitRevealContract.deploy({ data: contractFile.bytecode, arguments: [3, "YES", "NO"] })
-        // use truffle default values
-        .send(sendOption, (error, transactionHash) => { console.log('error, trxhash', error, transactionHash) })
-        .on('error', (error) => { console.log('error') })
-        .on('transactionHash', (transactionHash) => { console.log('transactionHash', transactionHash) })
-        .on('receipt', (receipt) => { console.log('receipt', receipt) })
-        .on('confirmation', (confirmationNumber, receipt) => { console.log('confirm', confirmationNumber, receipt) })
-        .then((newContractInstance) => {
-            CommitRevealContract.options.address = newContractInstance.options.address;
-            console.log('newContractInstance', newContractInstance.options.address) // instance with the new contract address
-        })
-        .catch((error) => {
-            console.log('Error Occured', error)
-        })
-
-    CommitRevealContract.methods.commitVote("0xe01c30ed9fc405f6f7cc0c26e92542fcbecd4f3566149d5bc42f4d38cd7bbee4")
-        .send(sendOption)
-
-    setTimeout(() => {
-        console.log('reavealing')
-        CommitRevealContract.methods.revealVote("1-password1", "0xe01c30ed9fc405f6f7cc0c26e92542fcbecd4f3566149d5bc42f4d38cd7bbee4")
-            .send(sendOption)
-
-    }, 2000)
-
-    setTimeout(async () => {
-
-        console.log('getWinner', await CommitRevealContract.methods.getWinner().call())
-    }, 4000)
-
+    program.parse(process.argv);
 }
 
-// main();
-
-init();
+main();
